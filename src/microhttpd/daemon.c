@@ -2441,6 +2441,8 @@ internal_add_connection (struct MHD_Daemon *daemon,
             client_socket);
 #endif
 #endif
+
+  /// 判断当前 ip 的请求是否达到了最大 连接数
   if ( (daemon->connections == daemon->connection_limit) ||
        (MHD_NO == MHD_ip_limit_add (daemon,
                                     addr,
@@ -2459,6 +2461,7 @@ internal_add_connection (struct MHD_Daemon *daemon,
     return MHD_NO;
   }
 
+  /// 判断是否接收 请求
   /* apply connection acceptance policy if present */
   if ( (NULL != daemon->apc) &&
        (MHD_NO == daemon->apc (daemon->apc_cls,
@@ -2481,6 +2484,7 @@ internal_add_connection (struct MHD_Daemon *daemon,
     return MHD_NO;
   }
 
+  /// 分配 connection 空间
   if (NULL == (connection = MHD_calloc_ (1, sizeof (struct MHD_Connection))))
   {
     eno = errno;
@@ -2496,6 +2500,8 @@ internal_add_connection (struct MHD_Daemon *daemon,
     errno = eno;
     return MHD_NO;
   }
+
+  /// 为这个 connection 分配内存， 用来存放 接收 数据
   connection->pool = MHD_pool_create (daemon->pool_size);
   if (NULL == connection->pool)
   {
@@ -2544,6 +2550,7 @@ internal_add_connection (struct MHD_Daemon *daemon,
 
   if (0 == (daemon->options & MHD_USE_TLS))
   {
+    /// 设置 http 接收 和 发送的回调函数
     /* set default connection handlers  */
     MHD_set_http_callbacks_ (connection);
   }
@@ -2657,16 +2664,20 @@ internal_add_connection (struct MHD_Daemon *daemon,
   daemon->connections++;
   if (0 == (daemon->options & MHD_USE_THREAD_PER_CONNECTION))
   {
+    /// 头插法的 双向链表，DLL应该是 Double Link List
     XDLL_insert (daemon->normal_timeout_head,
                  daemon->normal_timeout_tail,
                  connection);
   }
+  /// 头插法的 双向链表
   DLL_insert (daemon->connections_head,
               daemon->connections_tail,
               connection);
 #if defined(MHD_USE_POSIX_THREADS) || defined(MHD_USE_W32_THREADS)
   MHD_mutex_unlock_chk_ (&daemon->cleanup_connection_mutex);
 #endif
+
+  /// 通知有新的 连接 到了
   if (NULL != daemon->notify_connection)
     daemon->notify_connection (daemon->notify_connection_cls,
                                connection,
@@ -2676,6 +2687,7 @@ internal_add_connection (struct MHD_Daemon *daemon,
   /* attempt to create handler thread */
   if (0 != (daemon->options & MHD_USE_THREAD_PER_CONNECTION))
   {
+    /// 为新的连接创建一个线程
     if (! MHD_create_named_thread_ (&connection->pid,
                                     "MHD-connection",
                                     daemon->thread_stack_size,
@@ -4360,6 +4372,8 @@ MHD_epoll (struct MHD_Daemon *daemon,
     return MHD_NO; /* we're down! */
   if (daemon->shutdown)
     return MHD_NO;
+
+  /// 如果 listen_fd 不在 epoll 中，又不在静默模式中，就添加
   if ( (MHD_INVALID_SOCKET != (ls = daemon->listen_fd)) &&
        (! daemon->was_quiesced) &&
        (daemon->connections < daemon->connection_limit) &&
@@ -4382,6 +4396,8 @@ MHD_epoll (struct MHD_Daemon *daemon,
     }
     daemon->listen_socket_in_epoll = true;
   }
+
+  /// 静默，将 listen_fd 移除
   if ( (daemon->was_quiesced) &&
        (daemon->listen_socket_in_epoll) )
   {
@@ -4416,6 +4432,8 @@ MHD_epoll (struct MHD_Daemon *daemon,
     daemon->upgrade_fd_in_epoll = true;
   }
 #endif /* HTTPS_SUPPORT && UPGRADE_SUPPORT */
+
+  /// 达到最大连接数，删除 listen_fd，不再接受连接
   if ( (daemon->listen_socket_in_epoll) &&
        ( (daemon->connections == daemon->connection_limit) ||
          (daemon->at_limit) ||
@@ -4435,6 +4453,7 @@ MHD_epoll (struct MHD_Daemon *daemon,
        (MHD_YES == resume_suspended_connections (daemon)) )
     may_block = MHD_NO;
 
+  /// Time out for epoll
   if (MHD_YES == may_block)
   {
     if (MHD_YES == MHD_get_timeout (daemon,
@@ -4468,6 +4487,7 @@ MHD_epoll (struct MHD_Daemon *daemon,
                              events,
                              MAX_EVENTS,
                              timeout_ms);
+    /// error occurs
     if (-1 == num_events)
     {
       const int err = MHD_socket_get_error_ ();
@@ -4480,6 +4500,9 @@ MHD_epoll (struct MHD_Daemon *daemon,
 #endif
       return MHD_NO;
     }
+
+    /// 0 : if no file descriptor became ready
+    /// n : number of the file descriptor became ready
     for (i = 0; i<(unsigned int) num_events; i++)
     {
       /* First, check for the values of `ptr` that would indicate
@@ -4495,6 +4518,8 @@ MHD_epoll (struct MHD_Daemon *daemon,
         continue;
       }
 #endif /* HTTPS_SUPPORT && UPGRADE_SUPPORT */
+
+      /// ITC 触发，外部可以 unblock epoll_wait
       if (epoll_itc_marker == events[i].data.ptr)
       {
         /* It's OK to clear ITC here as all external
@@ -4502,6 +4527,8 @@ MHD_epoll (struct MHD_Daemon *daemon,
         MHD_itc_clear_ (daemon->itc);
         continue;
       }
+
+      /// listen的时候放的 ptr 是 daemon
       if (daemon == events[i].data.ptr)
       {
         /* Check for error conditions on listen socket. */
@@ -4513,6 +4540,8 @@ MHD_epoll (struct MHD_Daemon *daemon,
            * Do not accept more then 10 connections at once. The rest will
            * be accepted on next turn (level trigger is used for listen
            * socket). */
+          /// 循环接受连接请求，每次最多接受10个（TODO: 为什么是10呢？)
+          /// 如果还有没收全的，那就下次循环再接受
           while ( (MHD_YES == MHD_accept_connection (daemon)) &&
                   (series_length < 10) &&
                   (daemon->connections < daemon->connection_limit) &&
@@ -5850,7 +5879,7 @@ MHD_start_daemon_va (unsigned int flags,
   }
 #endif /* HTTPS_SUPPORT */
 
-
+  /// 解析用户参数
   if (MHD_YES != parse_options_va (daemon,
                                    &servaddr,
                                    ap))
@@ -5864,6 +5893,7 @@ MHD_start_daemon_va (unsigned int flags,
     return NULL;
   }
 
+  /// 判断是否使能 inter-thread communication(itc)
   if ( (NULL != daemon->notify_completed) &&
        (0 != (daemon->options & MHD_USE_THREAD_PER_CONNECTION)) )
     *pflags |= MHD_USE_ITC; /* requires ITC */
@@ -5881,6 +5911,7 @@ MHD_start_daemon_va (unsigned int flags,
 #endif
        )
   {
+    /// 初始化 itc 使用 pipe / event fd
     if (! MHD_itc_init_ (daemon->itc))
     {
 #ifdef HAVE_MESSAGES
@@ -5895,6 +5926,8 @@ MHD_start_daemon_va (unsigned int flags,
       free (daemon);
       return NULL;
     }
+
+    /// 对于不使用poll 和 epoll 的情况（用select)，判断 FD_SETSIZE
     if ( (0 == (*pflags & (MHD_USE_POLL | MHD_USE_EPOLL))) &&
          (! MHD_SCKT_FD_FITS_FDSET_ (MHD_itc_r_fd_ (daemon->itc),
                                      NULL)) )
@@ -5914,6 +5947,7 @@ MHD_start_daemon_va (unsigned int flags,
     }
   }
 
+/// digest authentication 摘要式身份认证
 #ifdef DAUTH_SUPPORT
   if (daemon->nonce_nc_size > 0)
   {
@@ -5979,6 +6013,8 @@ MHD_start_daemon_va (unsigned int flags,
     goto free_and_fail;
   }
 #endif
+
+  /// 应为之前解析参数的时候，可以直接传递过来一个socket_fd，所以判断一下是否有效
   if ( (MHD_INVALID_SOCKET == daemon->listen_fd) &&
        (0 == (*pflags & MHD_USE_NO_LISTEN_SOCKET)) )
   {
@@ -5993,6 +6029,7 @@ MHD_start_daemon_va (unsigned int flags,
     domain = PF_INET;
 #endif /* ! HAVE_INET6 */
 
+    /// 创建 socket
     listen_fd = MHD_socket_create_listen_ (domain);
     if (MHD_INVALID_SOCKET == listen_fd)
     {
@@ -6004,6 +6041,7 @@ MHD_start_daemon_va (unsigned int flags,
       goto free_and_fail;
     }
 
+    /// socket fd reuse 相关
     /* Apply the socket options according to listening_address_reuse. */
     if (0 == daemon->listening_address_reuse)
     {
@@ -6114,6 +6152,7 @@ MHD_start_daemon_va (unsigned int flags,
 #endif /* MHD_WINSOCK_SOCKETS */
     }
 
+    /// IPV4 / IPV6 相关
     /* check for user supplied sockaddr */
 #if HAVE_INET6
     if (0 != (*pflags & MHD_USE_IPv6))
@@ -6158,6 +6197,7 @@ MHD_start_daemon_va (unsigned int flags,
         servaddr = (struct sockaddr *) &servaddr4;
       }
     }
+    /// 保存 socket_fd
     daemon->listen_fd = listen_fd;
 
     if (0 != (*pflags & MHD_USE_IPv6))
@@ -6184,6 +6224,7 @@ MHD_start_daemon_va (unsigned int flags,
 #endif
 #endif
     }
+    /// bind listen fd to addr
     if (-1 == bind (listen_fd, servaddr, addrlen))
     {
 #ifdef HAVE_MESSAGES
@@ -6195,6 +6236,8 @@ MHD_start_daemon_va (unsigned int flags,
       MHD_socket_close_chk_ (listen_fd);
       goto free_and_fail;
     }
+
+    /// TODO: fast open ???
 #ifdef TCP_FASTOPEN
     if (0 != (*pflags & MHD_USE_TCP_FASTOPEN))
     {
@@ -6214,6 +6257,8 @@ MHD_start_daemon_va (unsigned int flags,
       }
     }
 #endif
+
+    /// TODO: active listen fd
     if (listen (listen_fd,
                 daemon->listen_backlog_size) < 0)
     {
@@ -6225,12 +6270,15 @@ MHD_start_daemon_va (unsigned int flags,
       MHD_socket_close_chk_ (listen_fd);
       goto free_and_fail;
     }
+
+    /// now socket create bind listen complete
   }
   else
   {
     listen_fd = daemon->listen_fd;
   }
 
+  /// TODO: socket name?
 #ifdef HAVE_GETSOCKNAME
   if ( (0 == daemon->port) &&
        (0 == (*pflags & MHD_USE_NO_LISTEN_SOCKET)) )
@@ -6310,6 +6358,8 @@ MHD_start_daemon_va (unsigned int flags,
     }
   }
 #endif /* HAVE_GETSOCKNAME */
+
+  /// set socket unblock
   if ( (MHD_INVALID_SOCKET != listen_fd) &&
        (! MHD_socket_nonblocking_ (listen_fd)) )
   {
@@ -6346,6 +6396,7 @@ MHD_start_daemon_va (unsigned int flags,
     goto free_and_fail;
   }
 
+  /// TODO:  为什么不支持 one thread per connection 和 epoll 结合 ???
 #ifdef EPOLL_SUPPORT
   if ( (0 != (*pflags & MHD_USE_EPOLL))
 #if defined(MHD_USE_POSIX_THREADS) || defined(MHD_USE_W32_THREADS)
@@ -6362,6 +6413,8 @@ MHD_start_daemon_va (unsigned int flags,
 #endif
       goto free_and_fail;
     }
+
+    /// 创建epoll_fd 并将并开始监听 listen_fd + itc
     if (MHD_YES != setup_epoll_to_listen (daemon))
       goto free_and_fail;
   }
@@ -6378,6 +6431,8 @@ MHD_start_daemon_va (unsigned int flags,
       MHD_socket_close_chk_ (listen_fd);
     goto free_and_fail;
   }
+
+  /// TODO: worker pool
   if (0 == daemon->worker_pool_size)
   {   /* Initialise connection mutex only if this daemon will handle
        * any connections by itself. */
@@ -6416,12 +6471,15 @@ MHD_start_daemon_va (unsigned int flags,
     goto free_and_fail;
   }
 #endif /* HTTPS_SUPPORT */
+
+
 #if defined(MHD_USE_POSIX_THREADS) || defined(MHD_USE_W32_THREADS)
   if ( (0 != (*pflags & MHD_USE_INTERNAL_POLLING_THREAD)) &&
        (0 == (*pflags & MHD_USE_NO_LISTEN_SOCKET)) )
   {
     if (0 == daemon->worker_pool_size)
     {
+      /// 创建一个 polling 线程
       if (! MHD_create_named_thread_ (&daemon->pid,
                                       (*pflags
                                        & MHD_USE_THREAD_PER_CONNECTION) ?
@@ -6444,6 +6502,7 @@ MHD_start_daemon_va (unsigned int flags,
     }
     else   /* 0 < daemon->worker_pool_size */
     {
+      /// TODO: 创建一个池子，这池子怎么玩儿呢 ???
       /* Coarse-grained count of connections per thread (note error
        * due to integer division). Also keep track of how many
        * connections are leftover after an equal split. */
@@ -6460,6 +6519,7 @@ MHD_start_daemon_va (unsigned int flags,
       if (NULL == daemon->worker_pool)
         goto thread_failed;
 
+      /// 创建多个 线程
       /* Start the workers in the pool */
       for (i = 0; i < daemon->worker_pool_size; ++i)
       {

@@ -166,5 +166,6 @@
 /* Define to 1 if you have the ANSI C header files. */
 #define STDC_HEADERS 1
 
+#define EPOLL_SUPPORT 1
 
 /* End of MHD_config.h */

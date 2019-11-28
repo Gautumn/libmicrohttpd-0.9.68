@@ -2544,7 +2544,7 @@ internal_add_connection (struct MHD_Daemon *daemon,
           addrlen);
   connection->addr_len = addrlen;
   connection->socket_fd = client_socket;
-  connection->sk_nonblck = non_blck;
+  connection->sk_nonblck = non_blck;        /// socket block or unblock
   connection->daemon = daemon;
   connection->last_activity = MHD_monotonic_sec_counter ();
 
@@ -2706,13 +2706,16 @@ internal_add_connection (struct MHD_Daemon *daemon,
   else
     connection->pid = daemon->pid;
 #endif
+
 #ifdef EPOLL_SUPPORT
   if (0 != (daemon->options & MHD_USE_EPOLL))
   {
     if ((0 == (daemon->options & MHD_USE_TURBO)) || (external_add))
     { /* Do not manipulate EReady DL-list in 'external_add' mode. */
-      struct epoll_event event;
 
+      /// 将 client socket 放到 epoll 中
+      struct epoll_event event;
+      
       event.events = EPOLLIN | EPOLLOUT | EPOLLPRI | EPOLLET;
       event.data.ptr = connection;
       if (0 != epoll_ctl (daemon->epoll_fd,
@@ -2732,6 +2735,7 @@ internal_add_connection (struct MHD_Daemon *daemon,
     }
     else
     {
+      /// 不设置 epoll fd， 只是设置标记位，然后将 connection 放入到 EDLL 双向队列中
       connection->epoll_state |= MHD_EPOLL_STATE_READ_READY
                                  | MHD_EPOLL_STATE_WRITE_READY
                                  | MHD_EPOLL_STATE_IN_EREADY_EDLL;
@@ -2741,7 +2745,10 @@ internal_add_connection (struct MHD_Daemon *daemon,
     }
   }
   else /* This 'else' is combined with next 'if'. */
-#endif
+#endif /// EPOLL_SUPPORT
+
+  /// If Epoll support, this if will not enabled.
+  /// Unblock epoll_wait by itc
   if ( (0 == (daemon->options & MHD_USE_THREAD_PER_CONNECTION)) &&
        (external_add) &&
        (MHD_ITC_IS_VALID_ (daemon->itc)) &&
@@ -2754,6 +2761,8 @@ internal_add_connection (struct MHD_Daemon *daemon,
 #endif
   }
   return MHD_YES;
+
+  /// 清理工作
   cleanup:
   if (NULL != daemon->notify_connection)
     daemon->notify_connection (daemon->notify_connection_cls,

@@ -2829,6 +2829,10 @@ MHD_connection_handle_read (struct MHD_Connection *connection)
   }
 #endif /* HTTPS_SUPPORT */
 
+  /// 判断是否需要扩大 接收 缓冲
+  /// read_buffer: 表示当前分配的 buffer 的指针
+  /// read_buffer_size: 表示当前分配的空间大小
+  /// read_buffer_offset: 表示当前正在操作的偏移量
   /* make sure "read" has a reasonable number of bytes
      in buffer to use per system call (if possible) */
   if (connection->read_buffer_offset + connection->daemon->pool_increment >
@@ -2837,8 +2841,11 @@ MHD_connection_handle_read (struct MHD_Connection *connection)
                           (connection->read_buffer_size ==
                            connection->read_buffer_offset));
 
+  /// 没有空间了
   if (connection->read_buffer_size == connection->read_buffer_offset)
     return; /* No space for receiving data. */
+  
+  /// 接收数据
   bytes_read = connection->recv_cls (connection,
                                      &connection->read_buffer
                                      [connection->read_buffer_offset],
@@ -2872,6 +2879,8 @@ MHD_connection_handle_read (struct MHD_Connection *connection)
                            MHD_REQUEST_TERMINATED_CLIENT_ABORT);
     return;
   }
+
+  /// 更新偏移量指针
   connection->read_buffer_offset += bytes_read;
   MHD_update_last_activity_ (connection);
 #if DEBUG_STATES
@@ -3277,7 +3286,7 @@ cleanup_connection (struct MHD_Connection *connection)
  *         connection (not dead yet), #MHD_NO if it died
  */
 int
-MHD_connection_handle_idle (struct MHD_Connection *connection)
+  MHD_connection_handle_idle (struct MHD_Connection *connection)
 {
   struct MHD_Daemon *daemon = connection->daemon;
   char *line;
@@ -3750,6 +3759,7 @@ MHD_connection_handle_idle (struct MHD_Connection *connection)
   if ( (! connection->suspended) &&
        (0 != (daemon->options & MHD_USE_EPOLL)) )
   {
+    /// just check if shall add connection to epoll fd
     ret = MHD_connection_epoll_update_ (connection);
   }
 #endif /* EPOLL_SUPPORT */

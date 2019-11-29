@@ -2672,6 +2672,8 @@ parse_connection_headers (struct MHD_Connection *connection)
   const char *end;
 
   parse_cookie_header (connection);
+
+  /// 判断当前的 http 版本，Host是否存在
   if ( (1 <= connection->daemon->strict_for_client) &&
        (NULL != connection->version) &&
        (MHD_str_equal_caseless_ (MHD_HTTP_VERSION_1_1,
@@ -2721,6 +2723,8 @@ parse_connection_headers (struct MHD_Connection *connection)
     return;
   }
 
+  /// 对 http 的格式还不清楚，需要看下http1.1协议
+  /// TODO: 判断传输支持 编码类型
   connection->remaining_upload_size = 0;
   if (MHD_NO != MHD_lookup_connection_value_n (connection,
                                                MHD_HEADER_KIND,
@@ -2737,6 +2741,7 @@ parse_connection_headers (struct MHD_Connection *connection)
   }
   else
   {
+    /// TODO: 判断 content length 附件长度
     if (MHD_NO != MHD_lookup_connection_value_n (connection,
                                                  MHD_HEADER_KIND,
                                                  MHD_HTTP_HEADER_CONTENT_LENGTH,
@@ -2882,6 +2887,7 @@ MHD_connection_handle_read (struct MHD_Connection *connection)
 
   /// 更新偏移量指针
   connection->read_buffer_offset += bytes_read;
+
   MHD_update_last_activity_ (connection);
 #if DEBUG_STATES
   MHD_DLOG (connection->daemon,
@@ -3407,6 +3413,8 @@ int
         break;
       continue;
     case MHD_CONNECTION_HEADERS_PROCESSED:
+
+      /// 调用 MHD_start_daemon() 时指定的回调函数
       call_connection_handler (connection);     /* first call */
       if (MHD_CONNECTION_CLOSED == connection->state)
         continue;
@@ -3421,11 +3429,14 @@ int
              (MHD_str_equal_caseless_ (connection->method,
                                        MHD_HTTP_METHOD_PUT))) )
       {
+        /// TODO: 有 response 的时候，为什么 post 和 put 的时候要 关闭接收呢 ？？？
         /* we refused (no upload allowed!) */
         connection->remaining_upload_size = 0;
         /* force close, in case client still tries to upload... */
         connection->read_closed = true;
       }
+
+      /// TODO: footers ??? 什么是footers ???
       connection->state = (0 == connection->remaining_upload_size)
                           ? MHD_CONNECTION_FOOTERS_RECEIVED :
                           MHD_CONNECTION_CONTINUE_SENT;
@@ -3523,11 +3534,14 @@ int
       }
       continue;
     case MHD_CONNECTION_FOOTERS_RECEIVED:
+      /// 如果第一次调用 有了 response，那这次调用就立刻返回了。
       call_connection_handler (connection);     /* "final" call */
       if (connection->state == MHD_CONNECTION_CLOSED)
         continue;
       if (NULL == connection->response)
         break;                  /* try again next time */
+
+      /// TODO: 应答先等等再看
       if (MHD_NO == build_header_response (connection))
       {
         /* oops - close! */

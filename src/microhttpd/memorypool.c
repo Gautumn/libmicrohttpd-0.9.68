@@ -275,11 +275,13 @@ MHD_pool_allocate (struct MemoryPool *pool,
     return NULL;
   if (from_end)
   {
+    /// 尾部分配
     ret = &pool->memory[pool->end - asize];
     pool->end -= asize;
   }
   else
   {
+    /// 头部分配
     ret = &pool->memory[pool->pos];
     pool->pos += asize;
   }

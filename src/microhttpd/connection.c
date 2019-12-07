@@ -3413,30 +3413,34 @@ int
         break;
       continue;
     case MHD_CONNECTION_HEADERS_PROCESSED:
-
       /// 调用 MHD_start_daemon() 时指定的回调函数
       call_connection_handler (connection);     /* first call */
       if (MHD_CONNECTION_CLOSED == connection->state)
         continue;
+
+      /// 当前的headers中是否有：Expect：100-continue，需要发送100 continue应答
       if (need_100_continue (connection))
       {
         connection->state = MHD_CONNECTION_CONTINUE_SENDING;
         break;
       }
+
+      /// 当前收到了headers，还可能有别的数据要接收，但因为上面调用了回掉函数，可能已经有了应答，那么剩下的数据就不要了。
       if ( (NULL != connection->response) &&
            ( (MHD_str_equal_caseless_ (connection->method,
                                        MHD_HTTP_METHOD_POST)) ||
              (MHD_str_equal_caseless_ (connection->method,
                                        MHD_HTTP_METHOD_PUT))) )
       {
-        /// TODO: 有 response 的时候，为什么 post 和 put 的时候要 关闭接收呢 ？？？
+        /// 一般 put 和 post 在 headers 后面有数据，那么剩下的数据就不要了。
         /* we refused (no upload allowed!) */
         connection->remaining_upload_size = 0;
         /* force close, in case client still tries to upload... */
         connection->read_closed = true;
       }
 
-      /// TODO: footers ??? 什么是footers ???
+      /// remaining_upload_size == 0 表示数据都收全了
+      /// remaining_upload_size != 0 表示还有数据需要继续接收
       connection->state = (0 == connection->remaining_upload_size)
                           ? MHD_CONNECTION_FOOTERS_RECEIVED :
                           MHD_CONNECTION_CONTINUE_SENT;
@@ -3444,6 +3448,7 @@ int
         break;
       continue;
     case MHD_CONNECTION_CONTINUE_SENDING:
+      /// headers 接收完成，发送 100-continue
       if (connection->continue_message_write_offset ==
           MHD_STATICSTR_LEN_ (HTTP_100_CONTINUE))
       {
@@ -3452,6 +3457,8 @@ int
       }
       break;
     case MHD_CONNECTION_CONTINUE_SENT:
+      /// 前面读取并处理了，start line + headers。下面开始读取 message body
+      /// TODO: 如何判断有 message body？
       if (0 != connection->read_buffer_offset)
       {
         process_request_body (connection);           /* loop call */
@@ -3464,10 +3471,14 @@ int
              (connection->read_closed) ) )
       {
         if ( (connection->have_chunked_upload) &&
-             (! connection->read_closed) )
+             (! connection->read_closed) ) {
+          /// chunked 方式并不知道还有多少要接收，跳到另一个状态
           connection->state = MHD_CONNECTION_BODY_RECEIVED;
-        else
+          }
+        else {
+          /// 非 chunked，知道要收多少数据，到这里就收完了
           connection->state = MHD_CONNECTION_FOOTERS_RECEIVED;
+        }
         if (connection->suspended)
           break;
         continue;
@@ -3490,6 +3501,7 @@ int
       }
       if (0 == line[0])
       {
+        /// 表示收到一个空行，chunked 数据收完了（已经收到了footer）。
         connection->state = MHD_CONNECTION_FOOTERS_RECEIVED;
         if (connection->suspended)
           break;
@@ -3527,6 +3539,7 @@ int
         continue;
       if (0 == line[0])
       {
+        /// TODO: 还有多个footers么？
         connection->state = MHD_CONNECTION_FOOTERS_RECEIVED;
         if (connection->suspended)
           break;
@@ -3534,6 +3547,7 @@ int
       }
       continue;
     case MHD_CONNECTION_FOOTERS_RECEIVED:
+      /// 收全了
       /// 如果第一次调用 有了 response，那这次调用就立刻返回了。
       call_connection_handler (connection);     /* "final" call */
       if (connection->state == MHD_CONNECTION_CLOSED)

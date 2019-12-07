@@ -3665,6 +3665,7 @@ int
       /* mutex was already unlocked by try_ready_chunked_body */
       break;
     case MHD_CONNECTION_BODY_SENT:
+      /// response body 发送完成
       if (MHD_NO == build_header_response (connection))
       {
         /* oops - close! */
@@ -3684,6 +3685,7 @@ int
       /* no default action */
       break;
     case MHD_CONNECTION_FOOTERS_SENT:
+      /// requests 的应答已经发送完成
       if (MHD_HTTP_PROCESSING == connection->responseCode)
       {
         /* After this type of response, we allow sending another! */
@@ -3718,14 +3720,15 @@ int
       }
       else
       {
+        /// 这里把状态又设置 MHD_CONNECTION_INIT 然后又 continue，那么又会调用一下 MHD_CONNECTION_INIT
         /* can try to keep-alive */
-
         connection->version = NULL;
         connection->state = MHD_CONNECTION_INIT;
         connection->last = NULL;
         connection->colon = NULL;
         connection->header_size = 0;
         connection->keepalive = MHD_CONN_KEEPALIVE_UNKOWN;
+        /// 应答发送完成，用户的请求就没必要保留了，复位 read buffer
         /* Reset the read buffer to the starting size,
            preserving the bytes we have already read. */
         connection->read_buffer
